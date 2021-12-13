@@ -143,7 +143,8 @@ class TDResource:
         print("Start deploy server and client ,version:{}".format(caseEnv["version"]))
         print(caseEnv)
         if caseEnv["clean"]:
-            self.cleanRemoteEnv(serverlist, clientlist)  # 清理环境
+            cleanpath = [caseEnv["dataDir"],caseEnv["logDir"]]
+            self.cleanRemoteEnv(serverlist, clientlist,cleanpath)  # 清理环境
         self.deploy(serverlist, clientlist, caseEnv["version"])
         pass
 
@@ -155,12 +156,12 @@ class TDResource:
                 continue
             self.remoteCmd(i, list("ls"), "client")
 
-    def cleanRemoteEnv(self, serverlist, clientlist):
+    def cleanRemoteEnv(self, serverlist, clientlist,filelist):
         cmdList = [
             "rmtaos || echo 'taso not install'",
-            "rm -rf /var/lib/taos",
-            "rm -rf /var/log/taos",
         ]
+        for i in filelist:
+            cmdList.append(f"rm -rf {i}")
         for i in serverlist:
             self.remoteCmd(i, cmdList, "server")
         for i in clientlist:
