@@ -1,11 +1,22 @@
-# This is a sample Python script.
+#!/usr/bin/python
+###################################################################
+#           Copyright (c) 2016 by TAOS Technologies, Inc.
+#                     All rights reserved.
+#
+#  This file is proprietary and confidential to TAOS Technologies.
+#  No part of this file may be reproduced, stored, transmitted,
+#  disclosed or used in any form or by any means other than as
+#  expressly provided by the written permission from Jianhui Tao
+#
+###################################################################
+# install pip
+# pip install src/connector/python/
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+# -*- coding: utf-8 -*-
 from util.resource import *
 
 
-# Press the green button in the gutter to run the script.
+
 if __name__ == '__main__':
     tdRes.init()
     tdRes.getResourceList()   #获取资源列表
@@ -16,5 +27,3 @@ if __name__ == '__main__':
     tdRes.reset()
 
 
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/

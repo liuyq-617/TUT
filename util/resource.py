@@ -87,7 +87,7 @@ class TDResource:
             )
             exit(-1)
         clientlist = []
-        print("client num:%d",clientnum)
+        print("client num:%d", clientnum)
         if clientnum == 0:
             clientlist.append(serverIdleList[0])
         else:
@@ -118,8 +118,7 @@ class TDResource:
         self.writeToYaml([server, client], os.path.join("res", "dev.yaml"))
 
     def reset(self):
-        """重置所有的资源为空闲状态
-        """
+        """重置所有的资源为空闲状态"""
         self.updateResource(self.serverlist, "server", "idle", 0)
         self.updateResource(self.clientlist, "client", "idle", 0)
 
@@ -142,25 +141,32 @@ class TDResource:
         )
         print(f"excute node :\n\tserver:{serverlist}\n\tclient:{clientlist}")
         print("Start deploy server and client ,version:{}".format(caseEnv["version"]))
+        print(caseEnv)
+        if caseEnv["clean"]:
+            self.cleanRemoteEnv(serverlist, clientlist)  # 清理环境
         self.deploy(serverlist, clientlist, caseEnv["version"])
         pass
 
     def deploy(self, serverlist, clientlist, version):
         for i in serverlist:
-            self.remoteCmd(
-                i, "ls","server"
-            )
+            self.remoteCmd(i, list("ls"), "server")
         for i in clientlist:
-            if i not in self.clientlist:continue
-            self.remoteCmd(
-                i, "ls","client"
-            )
-        pass
-    
-    def cleanRemoteEnv(self):
-        """[summary]
-        """
-        pass
+            if i not in self.clientlist:
+                continue
+            self.remoteCmd(i, list("ls"), "client")
+
+    def cleanRemoteEnv(self, serverlist, clientlist):
+        cmdList = [
+            "rmtaos || echo 'taso not install'",
+            "rm -rf /var/lib/taos",
+            "rm -rf /var/log/taos",
+        ]
+        for i in serverlist:
+            self.remoteCmd(i, cmdList, "server")
+        for i in clientlist:
+            if i not in self.clientlist:
+                continue
+            self.remoteCmd(i, cmdList, "client")
 
     def remoteCmd(self, node, cmd, type):
         temp = {}
@@ -179,13 +185,18 @@ class TDResource:
             print(f"connect to {host} failed")
         else:
             print(f"connect to {host} succeed")
-            print("="*50,host,": ",cmd,"start","="*50)
-            stdin, stdout, stderr = client.exec_command(cmd)
-            result = stdout.read().decode("utf-8")
-            if stderr:
-                print("error:{}".format(stderr.decode()))
+            for i in cmd:
+                print("=" * 30, host, ": ", i, "start", "=" * 30)
+                stdin, stdout, stderr = client.exec_command(i)
+                result = stdout.read().decode("utf-8")
+                err = stderr.read().decode("utf-8")
+                if err:
+                    print("error:{}".format(err))
+                else:
+                    print(result)
+                print("=" * 30, host, ": ", i, "finish", "=" * 30)
         finally:
-            print("="*50,host,": ",cmd,"finish","="*50)
+            print("=" * 30, host, " has finished", "finish", "=" * 30)
             client.close
         pass
 
