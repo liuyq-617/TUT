@@ -1,0 +1,32 @@
+- server:
+   node1:
+    FQDN: u05
+    OS: ubuntu
+    username: root
+    password: nihao617
+    idle: 0
+   node2:
+     FQDN: u06
+     OS: ubuntu
+     username: root
+     password: nihao617
+     idle: 0
+   node3:
+     FQDN: u07
+     OS: ubuntu
+     username: root
+     password: nihao617
+     idle: 0
+   node4:
+     FQDN: vm95
+     OS: centos
+     username: root
+     password: tbase125!
+     idle: 0
+- client:
+   node1:
+     FQDN: win
+     OS: windows
+     username: administartor
+     password: tbase125!
+     idle: 0

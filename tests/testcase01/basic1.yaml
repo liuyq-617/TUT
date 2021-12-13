@@ -1,0 +1,6 @@
+- name: basic1.py
+- group: testgroup
+  env: 
+    server: 2
+    client: 0 
+    version: 2.2.1.5
