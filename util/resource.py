@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ###################################################################
 #           Copyright (c) 2020 by TAOS Technologies, Inc.
 #                     All rights reserved.
@@ -9,7 +10,6 @@
 #
 ###################################################################
 
-# -*- coding: utf-8 -*-
 
 import sys
 import os
@@ -18,7 +18,8 @@ import datetime
 from typing_extensions import final
 from util.log import *
 import yaml
-import paramiko
+from fabric2 import Connection
+import requests
 
 
 class TDResource:
@@ -29,6 +30,7 @@ class TDResource:
         self.clientlist = []
         self.testcases = {}
         self.testgroup = set()
+        self.env = []
 
     def init(self):
         cfg = self.readYaml("res", "dev.yaml")
@@ -41,7 +43,7 @@ class TDResource:
             with open(yamlPath, "r") as f:
                 temp = f.read()
         except:
-            print(f"read resource file {yamlPath} failed")
+            print("read resource file {} failed".format(yamlPath))
             exit(-1)
         yamlresult = yaml.load(stream=temp, Loader=yaml.FullLoader)
         # print(yamlresult)
@@ -57,7 +59,7 @@ class TDResource:
         self.serverlist = list(self.server.keys())
         self.clientlist = list(self.client.keys())
 
-    def getResourceState(self) -> dict:
+    def getResourceState(self):
         serverStatus = {}
         clientStatus = {}
         for i in self.serverlist:
@@ -130,6 +132,13 @@ class TDResource:
             print(f"wirteToYaml: {file} failed")
         print(f"wirteToYaml: {file} succeed")
 
+    def updateEnv(self, casename, serverlist, clientlist):
+        env = {}
+        env["excuteCase"] = casename
+        env["server"] = serverlist
+        env["client"] = clientlist
+        self.env.append(env)
+
     def excuteCase(self, casename):
         try:
             caseEnv = self.testcases[casename]["env"]
@@ -139,26 +148,65 @@ class TDResource:
         serverlist, clientlist = self.getExcuteNode(
             caseEnv["server"], caseEnv["client"]
         )
+        self.updateEnv(casename, serverlist, clientlist)
         print(f"excute node :\n\tserver:{serverlist}\n\tclient:{clientlist}")
         print("Start deploy server and client ,version:{}".format(caseEnv["version"]))
         print(caseEnv)
         if caseEnv["clean"]:
-            cleanpath = [caseEnv["dataDir"],caseEnv["logDir"]]
-            self.cleanRemoteEnv(serverlist, clientlist,cleanpath)  # 清理环境
+            cleanpath = [caseEnv["dataDir"], caseEnv["logDir"]]
+            self.cleanRemoteEnv(serverlist, clientlist, cleanpath)  # 清理环境
         self.deploy(serverlist, clientlist, caseEnv["version"])
         pass
 
     def deploy(self, serverlist, clientlist, version):
         for i in serverlist:
-            self.remoteCmd(i, list("ls"), "server")
+            self.installTaos(i, version, "server")
         for i in clientlist:
             if i not in self.clientlist:
                 continue
-            self.remoteCmd(i, list("ls"), "client")
+            self.installTaos(i, version, "client")
 
-    def cleanRemoteEnv(self, serverlist, clientlist,filelist):
+    def installTaos(self, node, version, type):
+        taosdPath, taosPath = self.downloadTaosd(version)
+        cmd = [
+            "cd /tmp",
+            "tar zxf TDengine-%s-%s.tar.gz" % (type, version),
+            "cd TDengine-%s-%s" % (type, version),
+            'echo -en "\n\n"|./install*.sh',
+        ]
+        if type == "server":
+            self.remotePut(node, taosdPath, "/tmp", type)
+        elif type == "client":
+            self.remotePut(node, taosPath, "/tmp", type)
+        self.remoteCmd(node, cmd, type)
+
+    def downloadTaosd(self, version):
+        url_prifix = "https://www.taosdata.com/assets-download/TDengine-"
+        url_suffix = "-Linux-x64.tar.gz"
+        if (int(version.split(".")[1]) % 2) == 0:
+            server = requests.get("".join([url_prifix, "server-", version, url_suffix]))
+            client = requests.get("".join([url_prifix, "client-", version, url_suffix]))
+        else:
+            server = requests.get(
+                "".join([url_prifix, "server-", version, "-beta", url_suffix])
+            )
+            client = requests.get(
+                "".join([url_prifix, "client-", version, "-beta", url_suffix])
+            )
+        if server.status_code != 200 or client.status_code != 200:
+            print("can't get taosd,quit!!")
+            exit(-1)
+        with open("TDengine-server-{}.tar.gz".format(version), "wb") as f:
+            f.write(server.content)
+        with open(f"TDengine-client-{version}.tar.gz", "wb") as f:
+            f.write(client.content)
+        return os.path.join(
+            os.getcwd(), f"TDengine-server-{version}.tar.gz"
+        ), os.path.join(os.getcwd(), f"TDengine-client-{version}.tar.gz")
+
+    def cleanRemoteEnv(self, serverlist, clientlist, filelist):
         cmdList = [
-            "rmtaos || echo 'taso not install'",
+            "rmtaos || echo 'taos not install'",
         ]
         for i in filelist:
             cmdList.append(f"rm -rf {i}")
@@ -169,6 +217,26 @@ class TDResource:
                 continue
             self.remoteCmd(i, cmdList, "client")
 
+    def remotePut(self, node, file, path, type):
+        temp = {}
+        if type == "server":
+            temp = self.server
+        elif type == "client":
+            temp = self.client
+        host = temp[node]["FQDN"]
+        username = temp[node]["username"]
+        passwd = temp[node]["password"]
+        try:
+            with Connection(
+                host, user=username, connect_kwargs={"password": passwd}
+            ) as c:
+                print(file,path,host)
+                result = c.put(file, path)
+        except:
+            print("err on %s put%s",host,file)
+        finally:
+            print("=" * 30, host, " has finished", "=" * 30)
+
     def remoteCmd(self, node, cmd, type):
         temp = {}
         if type == "server":
@@ -178,28 +246,31 @@ class TDResource:
         host = temp[node]["FQDN"]
         username = temp[node]["username"]
         passwd = temp[node]["password"]
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
-            client.connect(hostname=host, port=22, username=username, password=passwd)
-        except:
-            print(f"connect to {host} failed")
-        else:
-            print(f"connect to {host} succeed")
-            for i in cmd:
-                print("=" * 30, host, ": ", i, "start", "=" * 30)
-                stdin, stdout, stderr = client.exec_command(i)
-                result = stdout.read().decode("utf-8")
-                err = stderr.read().decode("utf-8")
-                if err:
-                    print("error:{}".format(err))
-                else:
-                    print(result)
-                print("=" * 30, host, ": ", i, "finish", "=" * 30)
+            with Connection(
+                host, user=username, connect_kwargs={"password": passwd}
+            ) as c:
+                # if not cmd[0].startswith("cd"):
+                #     cmd.insert(0,"cd ~")
+                # cdlist = []
+                # for i in cmd:
+                #     if i.startswith("cd"):
+                #         cdlist.append(i)
+                # for i in range(len(cdlist)):
+                #     if i + 1 < 
+                #     cmd = cmd[cdlist[i]:cdlist[i+1]]
+                #     with c.run(cmd[0]) :
+                #         for i in cmd[1:]:
+                #             print("=" * 30, host, ": ", i, "start", "=" * 30)
+                cmdlist = "&&".join(cmd)
+                result = c.run(cmdlist)
+                if not result.ok :
+                    error = "On %s: %s" % (host, result.stderr)
+                    print(error)
+                    exit(-1)
+                print("=" * 30, host, ": ", cmdlist, "finish", "=" * 30)
         finally:
-            print("=" * 30, host, " has finished", "finish", "=" * 30)
-            client.close
-        pass
+            print("=" * 30, host, " has finished", "=" * 30)
 
     def whichIdle(self, dev) -> list:
         idleList = []
