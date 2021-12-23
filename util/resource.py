@@ -153,18 +153,27 @@ class TDResource:
         print("Start deploy server and client ,version:{}".format(caseEnv["version"]))
         print(caseEnv)
         if caseEnv["clean"]:
-            cleanpath = [caseEnv["dataDir"], caseEnv["logDir"]]
+            cleanpath = [caseEnv["dataDir"], caseEnv["logDir"], '/etc/taos/taos.cfg']
             self.cleanRemoteEnv(serverlist, clientlist, cleanpath)  # 清理环境
         self.deploy(serverlist, clientlist, caseEnv["version"])
+        print(self.env)
         pass
 
     def deploy(self, serverlist, clientlist, version):
+        firstep = self.server[serverlist[0]]["FQDN"]
         for i in serverlist:
             self.installTaos(i, version, "server")
+            
+            self.remoteCmd(i,[f"echo 'firstEp {firstep}:6030' >>/etc/taos/taos.cfg","systemctl start taosd"],"server")
+        for i in serverlist[1:]:
+            endpoint = self.server[i]["FQDN"]
+            createDnode = "create dnode '{0}'".format(endpoint)
+            self.remoteCmd(i,[f'taos -s "{createDnode}"'],"server")
         for i in clientlist:
             if i not in self.clientlist:
                 continue
             self.installTaos(i, version, "client")
+            self.remoteCmd(i,[f"echo 'firstEp {firstep}:6030' >>/etc/taos/taos.cfg"],"client")
 
     def installTaos(self, node, version, type):
         taosdPath, taosPath = self.downloadTaosd(version)
