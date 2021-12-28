@@ -24,7 +24,6 @@ class TDTestCase:
 
     def run(self):
         tdSql.prepare()
-
         ret = tdSql.execute('create table tb (ts timestamp, speed int)')
 
         insertRows = 10
@@ -46,6 +45,7 @@ class TDTestCase:
         # test case for https://jira.taosdata.com:18080/browse/TD-3716:
         tdSql.error("insert into tb(now, 1)")
         # test case for TD-10717
+        # tdLog.sleep(300)
         tdSql.error("insert into tb values(now,1),,(now+1s,1)")
         tdSql.execute("insert into tb values(now+2s,1),(now+3s,1),(now+4s,1)")
         tdSql.query("select * from tb")

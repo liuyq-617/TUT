@@ -19,7 +19,27 @@ from typing_extensions import final
 from util.log import *
 import yaml
 from fabric2 import Connection
+import patchwork.transfers
 import requests
+
+
+class TDSysoutput:
+    def __init__(self):
+        self.old_sysout = sys.stdout
+        self.closed = False
+
+    @property
+    def sysout_(self):
+        return self.old_sysout
+
+    def off(self):
+        sys.stdout = open(os.devnull, "w")
+        self.closed = True
+
+    def on(self):
+        if self.closed:
+            sys.stdout.close()
+        sys.stdout = self.old_sysout
 
 
 class TDResource:
@@ -77,6 +97,7 @@ class TDResource:
 
     def handleCaseFile(self, root, file):
         ctemp = self.readYaml(root, file)
+        ctemp[1]["dir"] = root
         self.testcases[ctemp[0]["name"]] = ctemp[1]
         self.testgroup.add(ctemp[1]["group"])
 
@@ -130,7 +151,7 @@ class TDResource:
                 yaml.dump(content, f)
         except:
             print(f"wirteToYaml: {file} failed")
-        print(f"wirteToYaml: {file} succeed")
+        # print(f"wirteToYaml: {file} succeed")
 
     def updateEnv(self, casename, serverlist, clientlist):
         env = {}
@@ -151,43 +172,67 @@ class TDResource:
         self.updateEnv(casename, serverlist, clientlist)
         print(f"excute node :\n\tserver:{serverlist}\n\tclient:{clientlist}")
         print("Start deploy server and client ,version:{}".format(caseEnv["version"]))
-        print(caseEnv)
+        print("cassEnv", caseEnv)
         if caseEnv["clean"]:
-            cleanpath = [caseEnv["dataDir"], caseEnv["logDir"], '/etc/taos/taos.cfg']
+            cleanpath = [caseEnv["dataDir"], caseEnv["logDir"], "/etc/taos/taos.cfg"]
             self.cleanRemoteEnv(serverlist, clientlist, cleanpath)  # 清理环境
-        self.deploy(serverlist, clientlist, caseEnv["version"])
-        print(self.env)
-        pass
+        if caseEnv["deploy"]:
+            self.deploy(serverlist, clientlist, caseEnv["version"])
+        print("self.env", self.env)
+        case = os.path.join(self.testcases[casename]["dir"], casename)
+        cfgpath = os.path.join(caseEnv["cfgDir"], "taos.cfg")
+        self.remoteCmd("snode1", ["rm -rf /tmp/TUT"])
+        self.remotePut("snode1", "../TUT", "/tmp")
+        for i in self.env:
+            if i["excuteCase"] == casename:
+                for j in i["client"]:
+                    firstep = firstep = self.server[i["server"][0]]["FQDN"]
+                    execCase = [
+                        "cd /tmp/TUT",
+                        f"python3 -u test.py -f {case} -m {firstep} -t {cfgpath} -n",
+                    ]
+                    self.remoteCmd(j, execCase)
 
     def deploy(self, serverlist, clientlist, version):
         firstep = self.server[serverlist[0]]["FQDN"]
         for i in serverlist:
-            self.installTaos(i, version, "server")
-            
-            self.remoteCmd(i,[f"echo 'firstEp {firstep}:6030' >>/etc/taos/taos.cfg","systemctl start taosd"],"server")
+            self.installTaos(i, version)
+
+            self.remoteCmd(
+                i,
+                [
+                    f"echo 'firstEp {firstep}:6030' >>/etc/taos/taos.cfg",
+                    "systemctl start taosd",
+                ],
+            )
         for i in serverlist[1:]:
             endpoint = self.server[i]["FQDN"]
             createDnode = "create dnode '{0}'".format(endpoint)
-            self.remoteCmd(i,[f'taos -s "{createDnode}"'],"server")
+            self.remoteCmd(i, [f'taos -s "{createDnode}"'])
         for i in clientlist:
             if i not in self.clientlist:
+                self.remoteCmd(i, ["rm -rf /tmp/TUT"])
+                self.remotePut(i, "../TUT", "/tmp")
                 continue
-            self.installTaos(i, version, "client")
-            self.remoteCmd(i,[f"echo 'firstEp {firstep}:6030' >>/etc/taos/taos.cfg"],"client")
+            self.installTaos(i, version)
 
-    def installTaos(self, node, version, type):
+    def installTaos(self, node, version):
         taosdPath, taosPath = self.downloadTaosd(version)
+        if node.startswith("s"):
+            type = "server"
+        elif node.startswith("c"):
+            type = "client"
         cmd = [
             "cd /tmp",
             "tar zxf TDengine-%s-%s.tar.gz" % (type, version),
             "cd TDengine-%s-%s" % (type, version),
             'echo -en "\n\n"|./install*.sh',
         ]
-        if type == "server":
-            self.remotePut(node, taosdPath, "/tmp", type)
-        elif type == "client":
-            self.remotePut(node, taosPath, "/tmp", type)
-        self.remoteCmd(node, cmd, type)
+        if node.startswith("s"):
+            self.remotePut(node, taosdPath, "/tmp")
+        elif node.startswith("c"):
+            self.remotePut(node, taosPath, "/tmp")
+        self.remoteCmd(node, cmd)
 
     def downloadTaosd(self, version):
         url_prifix = "https://www.taosdata.com/assets-download/TDengine-"
@@ -220,17 +265,17 @@ class TDResource:
         for i in filelist:
             cmdList.append(f"rm -rf {i}")
         for i in serverlist:
-            self.remoteCmd(i, cmdList, "server")
+            self.remoteCmd(i, cmdList)
         for i in clientlist:
             if i not in self.clientlist:
                 continue
-            self.remoteCmd(i, cmdList, "client")
+            self.remoteCmd(i, cmdList)
 
-    def remotePut(self, node, file, path, type):
+    def remotePut(self, node, file, path):
         temp = {}
-        if type == "server":
+        if node.startswith("s"):
             temp = self.server
-        elif type == "client":
+        elif node.startswith("c"):
             temp = self.client
         host = temp[node]["FQDN"]
         username = temp[node]["username"]
@@ -239,22 +284,28 @@ class TDResource:
             with Connection(
                 host, user=username, connect_kwargs={"password": passwd}
             ) as c:
-                print(file,path,host)
-                result = c.put(file, path)
+                print(file, path, host)
+                if os.path.isdir(file):
+                    tOut.off()
+                    patchwork.transfers.rsync(c, file, path, exclude=".git")
+                    tOut.on()
+                else:
+                    result = c.put(file, path)
         except:
-            print("err on %s put%s",host,file)
+            print("err on %s put%s", host, file)
         finally:
             print("=" * 30, host, " has finished", "=" * 30)
 
-    def remoteCmd(self, node, cmd, type):
+    def remoteCmd(self, node, cmd):
         temp = {}
-        if type == "server":
+        if node.startswith("s"):
             temp = self.server
-        elif type == "client":
+        elif node.startswith("c"):
             temp = self.client
         host = temp[node]["FQDN"]
         username = temp[node]["username"]
         passwd = temp[node]["password"]
+        # origin_stdout = sys.stdout
         try:
             with Connection(
                 host, user=username, connect_kwargs={"password": passwd}
@@ -266,18 +317,23 @@ class TDResource:
                 #     if i.startswith("cd"):
                 #         cdlist.append(i)
                 # for i in range(len(cdlist)):
-                #     if i + 1 < 
+                #     if i + 1 <
                 #     cmd = cmd[cdlist[i]:cdlist[i+1]]
                 #     with c.run(cmd[0]) :
                 #         for i in cmd[1:]:
                 #             print("=" * 30, host, ": ", i, "start", "=" * 30)
                 cmdlist = "&&".join(cmd)
                 result = c.run(cmdlist)
-                if not result.ok :
+                # for line in iter(result.stdout):
+                #     print(line,end="")
+                if not result.ok:
                     error = "On %s: %s" % (host, result.stderr)
                     print(error)
                     exit(-1)
                 print("=" * 30, host, ": ", cmdlist, "finish", "=" * 30)
+        except Exception as exc:
+            print("=" * 30, host, ": ", cmdlist, "failed", "=" * 30)
+            # print("exception: {} end".format(exc))           
         finally:
             print("=" * 30, host, " has finished", "=" * 30)
 
@@ -307,3 +363,4 @@ class TDResource:
 
 
 tdRes = TDResource()
+tOut = TDSysoutput()

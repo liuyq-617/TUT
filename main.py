@@ -22,6 +22,7 @@ if __name__ == '__main__':
     tdRes.getResourceList()   #获取资源列表
     tdRes.getResourceState()  #获取资源状态
     tdRes.getTestcase()       #获取所有的测试用例
+    print(tdRes.env)
     tdRes.reset()             #重置所有的资源
     tdRes.excuteCase("basic.py")        #执行测试用例
     tdRes.reset()

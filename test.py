@@ -37,8 +37,10 @@ if __name__ == "__main__":
     stop = 0
     restart = False
     windows = 0
-    opts, args = getopt.gnu_getopt(sys.argv[1:], 'f:p:m:l:scghrw', [
-        'file=', 'path=', 'master', 'logSql', 'stop', 'cluster', 'valgrind', 'help', 'windows'])
+    nnf = True
+    cfgPath = ""
+    opts, args = getopt.gnu_getopt(sys.argv[1:], 'f:p:m:l:scghrwnt', [
+        'file=', 'path=', 'master', 'logSql', 'stop', 'cluster', 'valgrind', 'help', 'windows','newframework','taosConfDir'])
     for key, value in opts:
         if key in ['-h', '--help']:
             tdLog.printNoPrefix(
@@ -52,6 +54,8 @@ if __name__ == "__main__":
             tdLog.printNoPrefix('-g valgrind Test Flag')
             tdLog.printNoPrefix('-r taosd restart test')
             tdLog.printNoPrefix('-w taos on windows')
+            tdLog.printNoPrefix('-n new framework')
+            tdLog.printNoPrefix('-t taosConfDir')
             sys.exit(0)
 
         if key in ['-r', '--restart']: 
@@ -86,6 +90,12 @@ if __name__ == "__main__":
 
         if key in ['-w', '--windows']:
             windows = 1
+
+        if key in ['-n', '--newframework']:
+            nnf = False
+        
+        if key in ['-t', '--taosConfDir']:
+            cfgPath = value
 
     if (stop != 0):
         if (valgrind == 0):
@@ -123,7 +133,7 @@ if __name__ == "__main__":
         host = masterIp
 
     tdLog.info("Procedures for tdengine deployed in %s" % (host))
-    if windows:
+    if windows and nnf:
         tdCases.logSql(logSql)
         tdLog.info("Procedures for testing self-deployment")
         td_clinet = TDSimClient("C:\\TDengine")
@@ -135,7 +145,7 @@ if __name__ == "__main__":
             host="%s"%(host),
             config=td_clinet.cfgDir)
         tdCases.runOneWindows(conn, fileName)
-    else:
+    elif nnf:
         tdDnodes.init(deployPath)
         tdDnodes.setTestCluster(testCluster)
         tdDnodes.setValgrind(valgrind)
@@ -194,4 +204,12 @@ if __name__ == "__main__":
                     tdCases.runOneLinux(conn, sp[0] + "_" + "restart.py")
                 else:
                     tdLog.info("not need to query")
+    else:
+        tdCases.logSql(logSql)
+        tdLog.info("Procedures for testing self-deployment")
+        conn = taos.connect(
+            host="%s"%(host),
+            config=cfgPath)
+        tdCases.runOneLinux(conn, fileName)
+
     conn.close()

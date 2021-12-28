@@ -1,0 +1,4 @@
+*tar.gz
+*.swp
+util/__pychche__/
+*.pyc
